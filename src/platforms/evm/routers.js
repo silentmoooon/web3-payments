@@ -13,7 +13,7 @@ export default {
   },
 
   polygon: {
-    address: '0x50CFAB577623B1359602E11514a9482B061A941e',
+    address: '0x613ADBa4dC31F6DC93be86b21E3dDda249731976',
     api: API
   },
 

@@ -30,16 +30,9 @@ class PaymentRoute {
   constructor({
     blockchain,
     fromAddress,
-    fromToken,
-    fromAmount,
-    fromDecimals,
-    fromBalance,
-    toToken,
-    toAmount,
-    toDecimals,
+    fromTokens,
     toAddress,
-    fee,
-    feeAmount,
+    toTokens, fee,
     exchangeRoutes,
     approvalRequired,
     currentAllowance,
@@ -48,16 +41,11 @@ class PaymentRoute {
   }) {
     this.blockchain = blockchain
     this.fromAddress = fromAddress
-    this.fromToken = fromToken
-    this.fromAmount = (fromAmount || toAmount)?.toString()
-    this.fromDecimals = fromDecimals
-    this.fromBalance = fromBalance
-    this.toToken = toToken
-    this.toAmount = toAmount?.toString()
-    this.toDecimals = toDecimals
+    this.fromTokens = fromTokens
+
+    this.toTokens = toTokens
     this.toAddress = toAddress
     this.fee = fee
-    this.feeAmount = feeAmount
     this.exchangeRoutes = exchangeRoutes || []
     this.currentAllowance = currentAllowance
     this.approvalRequired = approvalRequired
@@ -83,17 +71,25 @@ function convertToRoutes({ assets, accept, from }) {
 
         return new PaymentRoute({
           blockchain,
-          fromToken,
-          fromDecimals,
-          toToken,
-          toAmount,
-          toDecimals,
-          fromBalance: asset.balance,
+          fromTokens:[{
+            tokenAddress: fromToken,
+            amount: toAmount,
+            decimals: fromDecimals,
+            balance: asset.balance,
+            swapTokenAddress: toToken,
+            swapAmount: toAmount,
+          }],
+          toTokens: [{
+            tokenAddress: toToken,
+            amount: toAmount,
+            toDecimals:toDecimals,
+          }],
           fromAddress: from[configuration.blockchain],
           toAddress: configuration.toAddress,
-          fee: configuration.fee,
+          fee: configuration.fee
+
         })
-      } else if(configuration.fromToken && configuration.fromAmount && fromToken.address.toLowerCase() == configuration.fromToken.toLowerCase()) {
+      } else if(configuration.fromToken && configuration.fromAmount && fromToken.address.toLowerCase() === configuration.fromToken.toLowerCase()) {
         let blockchain = configuration.blockchain
         let fromAmount = (await fromToken.BigNumber(configuration.fromAmount)).toString()
         let fromDecimals = asset.decimals
@@ -102,15 +98,21 @@ function convertToRoutes({ assets, accept, from }) {
         
         return new PaymentRoute({
           blockchain,
-          fromToken,
-          fromDecimals,
-          fromAmount,
-          toToken,
-          toDecimals,
-          fromBalance: asset.balance,
+          fromTokens:[{
+            tokenAddress: fromToken,
+            amount: fromAmount,
+            decimals: fromDecimals,
+            balance: asset.balance,
+            swapTokenAddress: toToken,
+
+          }],
+          toTokens: [{
+            tokenAddress: toToken,
+            toDecimals:toDecimals,
+          }],
           fromAddress: from[configuration.blockchain],
           toAddress: configuration.toAddress,
-          fee: configuration.fee,
+          fee: configuration.fee
         })
       }
     }))
@@ -282,53 +284,59 @@ let filterBlacklistedAssets = ({ assets, blacklist }) => {
 let addExchangeRoutes = async (routes) => {
   return await Promise.all(
     routes.map((route) => {
-      if(route.directTransfer) { return [] }
-      if(route.toToken && route.toAmount) {
-        return Exchanges.route({
-          blockchain: route.blockchain,
-          tokenIn: route.fromToken.address,
-          tokenOut: route.toToken.address,
-          amountOutMin: route.toAmount,
-          fromAddress: route.fromAddress,
-          toAddress: route.toAddress
-        })
-      } else if(route.fromToken && route.fromAmount) {
-        return Exchanges.route({
-          blockchain: route.blockchain,
-          tokenIn: route.fromToken.address,
-          tokenOut: route.toToken.address,
-          amountIn: route.fromAmount,
-          fromAddress: route.fromAddress,
-          toAddress: route.toAddress
-        })
-      }
-    }),
-  ).then((exchangeRoutes) => {
-    return routes.map((route, index) => {
-      route.exchangeRoutes = exchangeRoutes[index]
+      route.fromTokens.forEach((fromToken)=>{
+        if(fromToken.directTransfer){
+          fromToken.exchangeRoutes=[]
+        }
+        if(fromToken.swapTokenAddress && fromToken.swapAmount) {
+          fromToken.exchangeRoutes= Exchanges.route({
+            blockchain: route.blockchain,
+            tokenIn: fromToken.tokenAddress,
+            tokenOut: fromToken.swapTokenAddress,
+            amountOutMin: fromToken.toAmount,
+            fromAddress: route.fromAddress,
+            toAddress: route.toAddress
+          })
+        } else if(fromToken.tokenAddress && fromToken.amount) {
+          fromToken.exchangeRoutes= Exchanges.route({
+            blockchain: route.blockchain,
+            tokenIn: fromToken.tokenAddress,
+            tokenOut: fromToken.swapTokenAddress,
+            amountIn: fromToken.amount,
+            fromAddress: route.fromAddress,
+            toAddress: route.toAddress
+          })
+        }
+      });
       return route
-    })
-  })
+    }),
+  )
 }
 
 let filterNotRoutable = (routes) => {
-  return routes.filter((route) => {
-    return (
-      route.exchangeRoutes.length != 0 ||
-      route.fromToken.address.toLowerCase() == route.toToken.address.toLowerCase() // direct transfer always possible
-    )
+  return routes.map((route) => {
+    route.fromTokens.filter((fromToken)=>{
+      return (
+          fromToken.exchangeRoutes.length !== 0 ||
+          fromToken.tokenAddress.toLowerCase() === fromToken.swapTokenAddress.toLowerCase() // direct transfer always possible
+      )
+    })
+    return route
   })
 }
 
 let filterInsufficientBalance = async(routes) => {
-  return routes.filter((route) => {
-    if (route.fromToken.address.toLowerCase() == route.toToken.address.toLowerCase()) {
-      return ethers.BigNumber.from(route.fromBalance).gte(ethers.BigNumber.from(route.toAmount))
-    } else if(route.fromAmount && route.toAmount) {
-      return ethers.BigNumber.from(route.fromBalance).gte(ethers.BigNumber.from(route.exchangeRoutes[0].amountInMax))
-    } else if(route.exchangeRoutes[0] && route.exchangeRoutes[0].amountIn) {
-      return ethers.BigNumber.from(route.fromBalance).gte(ethers.BigNumber.from(route.exchangeRoutes[0].amountIn))
-    }
+  return routes.map((route) => {
+    route.fromTokens.filter((fromToken)=>{
+      if (fromToken.tokenAddress.toLowerCase() === fromToken.swapTokenAddress.toLowerCase()) {
+        return ethers.BigNumber.from(fromToken.balance).gte(ethers.BigNumber.from(fromToken.amount))
+      } else if(fromToken.amount && fromToken.swapAmount) {
+        return ethers.BigNumber.from(fromToken.balance).gte(ethers.BigNumber.from(fromToken.exchangeRoutes[0].amountInMax))
+      } else if(fromToken.exchangeRoutes[0] && fromToken.exchangeRoutes[0].amountIn) {
+        return ethers.BigNumber.from(fromToken.balance).gte(ethers.BigNumber.from(fromToken.exchangeRoutes[0].amountIn))
+      }
+    })
+    return route
   })
 }
 
@@ -375,9 +383,14 @@ let addApproval = (routes) => {
 let addDirectTransferStatus = ({ routes }) => {
   return routes.map((route)=>{
     if(supported.evm.includes(route.blockchain)) {
-      route.directTransfer = route.fromToken.address.toLowerCase() == route.toToken.address.toLowerCase() && route.fee == undefined
+      route.fromTokens.forEach((fromToken)=>{
+        fromToken.directTransfer = fromToken.tokenAddress.address.toLowerCase() === fromToken.swapTokenAddress.address.toLowerCase()
+      })
+      //route.directTransfer = route.fromToken.address.toLowerCase() == route.toToken.address.toLowerCase() && route.fee == undefined
     } else if (route.blockchain === 'solana') {
-      route.directTransfer = route.fromToken.address.toLowerCase() == route.toToken.address.toLowerCase()
+      route.fromTokens.forEach((fromToken)=>{
+        fromToken.directTransfer = fromToken.tokenAddress.address.toLowerCase() === fromToken.swapTokenAddress.address.toLowerCase()
+      })
     }
     return route
   })
@@ -430,17 +443,19 @@ let addRouteAmounts = ({ routes })=> {
   return routes.map((route)=>{
 
     if(supported.evm.includes(route.blockchain)) {
-
-      if(route.directTransfer && !route.fee) {
-        route.fromAmount = route.toAmount
-      } else {
-        let { fromAmount, toAmount, feeAmount } = calculateAmounts({ paymentRoute: route, exchangeRoute: route.exchangeRoutes[0] })
-        route.fromAmount = fromAmount
-        route.toAmount = toAmount
-        if(route.fee){
-          route.feeAmount = feeAmount
+      route.fromTokens.map((fromToken)=>{
+        if(fromToken.directTransfer && !fromToken.fee) {
+          fromToken.amount = route.swapAmount
+        } else {
+          let { fromAmount, toAmount, feeAmount } = calculateAmounts({ paymentRoute: route, exchangeRoute: route.exchangeRoutes[0] })
+          route.fromAmount = fromAmount
+          route.toAmount = toAmount
+          if(route.fee){
+            route.feeAmount = feeAmount
+          }
         }
-      }
+      })
+
     } else if (supported.solana.includes(route.blockchain)) {
 
       let { fromAmount, toAmount, feeAmount } = calculateAmounts({ paymentRoute: route, exchangeRoute: route.exchangeRoutes[0] })
