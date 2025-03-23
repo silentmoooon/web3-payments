@@ -220,96 +220,34 @@ const transactionParams = async ({ paymentRoute, options, deadline })=> {
         exchangeAddress = EXCHANGE_PROXIES[exchangeTransaction.blockchain][exchangeRoute.exchange[paymentRoute.blockchain].router.address] || exchangeRoute.exchange[paymentRoute.blockchain].router.address
       }
     }
-    let params
-    if(options && options?.wallet?.name === 'World App' && paymentRoute.blockchain === 'worldchain'){
-      
-      const permitDeadline = Math.floor(Date.now() / 1000) + 30 * 60
-      const nonce = await getPermit2SignatureTransferNonce({ blockchain: paymentRoute.blockchain, address: paymentRoute.fromAddress })
-      
-      const permitTransfer = {
-        permitted: {
-          token: paymentRoute.fromToken.address,
-          amount: paymentRoute.fromAmount.toString(),
-        },
-        nonce: nonce.toString(),
-        deadline: permitDeadline.toString(),
+
+    let paramFromTokens = []
+      paramFromTokens[0] = {
+        tokenAddress: paymentRoute.fromToken.address,
+        amount: paymentRoute.fromAmount,
+        swapTokenAddress: paymentRoute.toToken.address,
+        swapAmount: paymentRoute.toAmount+(paymentRoute.feeAmount || 0),
+        exchangeAddress: exchangeAddress,
+        exchangeCallData: exchangeCallData,
+        exchangeType: exchangeType
+      }
+    let paramToTokens = []
+      paramToTokens[0] = {
+        tokenAddress: paymentRoute.toToken.address,
+        amount: paymentRoute.toAmount,
+        feeAmount: paymentRoute.feeAmount || 0,
       }
 
-      params = {
-        args: [
-          [ // payment
-            paymentRoute.fromAmount.toString(), // amountIn
-            paymentRoute.toAmount.toString(), // paymentAmount
-            (paymentRoute.feeAmount || 0).toString(), // feeAmount
-            "0", // protocolAmount
-            deadline.toString(), // deadline
-            paymentRoute.fromToken.address, // tokenInAddress
-            exchangeAddress, // exchangeAddress
-            paymentRoute.toToken.address, // tokenOutAddress
-            paymentRoute.toAddress, // paymentReceiverAddress
-            paymentRoute.fee ? paymentRoute.fee.receiver : Blockchains[paymentRoute.blockchain].zero, // feeReceiverAddress
-            exchangeType, // exchangeType
-            0, // receiverType
-            true, // permit2
-            exchangeCallData, // exchangeCallData
-            '0x', // receiverCallData
-          ],
-          [ // permitTransferFromAndSignature
-            [ // permitTransferFrom
-              [ // permitted
-                paymentRoute.fromToken.address, // token
-                paymentRoute.fromAmount.toString() // amount
-              ],
-              nonce.toString(), // nonce
-              permitDeadline.toString() // deadline
-            ],
-            "PERMIT2_SIGNATURE_PLACEHOLDER_0"
-          ]
-        ],
-        permit2: {
-          ...permitTransfer,
-          spender: routers[paymentRoute.blockchain].address,
-        },
-      }
-
-    } else if(paymentRoute.blockchain === 'worldchain') {
-      params = {
+    let  params = {
         payment: {
-          amountIn: paymentRoute.fromAmount,
-          paymentAmount: paymentRoute.toAmount,
-          feeAmount: paymentRoute.feeAmount || 0,
-          protocolAmount: 0,
-          tokenInAddress: paymentRoute.fromToken.address,
-          exchangeAddress,
-          tokenOutAddress: paymentRoute.toToken.address,
+          fromTokens: paramFromTokens,
+          toTokens: paramToTokens,
           paymentReceiverAddress: paymentRoute.toAddress,
           feeReceiverAddress: paymentRoute.fee ? paymentRoute.fee.receiver : Blockchains[paymentRoute.blockchain].zero,
-          exchangeType: exchangeType,
-          receiverType: 0,
-          exchangeCallData: exchangeCallData,
-          receiverCallData: Blockchains[paymentRoute.blockchain].zero,
           deadline,
         }
       }
-    } else {
-      params = {
-        payment: {
-          amountIn: paymentRoute.fromAmount,
-          paymentAmount: paymentRoute.toAmount,
-          feeAmount: paymentRoute.feeAmount || 0,
-          tokenInAddress: paymentRoute.fromToken.address,
-          exchangeAddress,
-          tokenOutAddress: paymentRoute.toToken.address,
-          paymentReceiverAddress: paymentRoute.toAddress,
-          feeReceiverAddress: paymentRoute.fee ? paymentRoute.fee.receiver : Blockchains[paymentRoute.blockchain].zero,
-          exchangeType: exchangeType,
-          receiverType: 0,
-          exchangeCallData: exchangeCallData,
-          receiverCallData: Blockchains[paymentRoute.blockchain].zero,
-          deadline,
-        }
-      }
-    }
+    
     return params
   }
 }
